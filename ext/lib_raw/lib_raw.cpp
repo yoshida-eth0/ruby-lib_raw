@@ -15,7 +15,13 @@ VALUE rb_mProgress;
 VALUE rb_mThumbnailFormat;
 
 VALUE rb_cRawObject;
+
+VALUE rb_cIParam;
 VALUE rb_cImageSize;
+VALUE rb_cImgOther;
+VALUE rb_cOutputParam;
+VALUE rb_cMakerNote;
+VALUE rb_cLensInfo;
 
 VALUE rb_eRawError;
 VALUE rb_eUnspecifiedError;
@@ -43,6 +49,11 @@ void lib_raw_native_resource_delete(LibRawNativeResource * p)
 	free(p);
 }
 
+void output_param_native_resource_delete(OutputParamNativeResource * p)
+{
+	free(p);
+}
+
 LibRaw* get_lib_raw(VALUE self)
 {
 	VALUE resource = rb_iv_get(self, "lib_raw_native_resource");
@@ -59,21 +70,132 @@ LibRaw* get_lib_raw(VALUE self)
 	return NULL;
 }
 
+libraw_output_params_t* get_output_params(VALUE self)
+{
+	VALUE resource = rb_iv_get(self, "output_param_native_resource");
+	if (resource==Qnil) {
+		return NULL;
+	}
+
+	OutputParamNativeResource *p = NULL;
+	Data_Get_Struct(resource, OutputParamNativeResource, p);
+	if (p) {
+		return &p->params;
+	}
+
+	return NULL;
+}
+
 void copy_lib_raw(VALUE dst, VALUE src)
 {
 	VALUE resource = rb_iv_get(src, "lib_raw_native_resource");
 	rb_iv_set(dst, "lib_raw_native_resource", resource);
 }
 
-void check_errors(enum LibRaw_errors e)
+void check_errors(int e)
 {
+	enum LibRaw_errors errorcode = (LibRaw_errors)e;
 	if (e!=LIBRAW_SUCCESS) {
-		// TODO: raise
+		const char *mess = libraw_strerror(e);
+
+		switch (e) {
+		case LIBRAW_UNSPECIFIED_ERROR:
+			rb_raise(rb_eUnspecifiedError, "%s", mess);
+		case LIBRAW_FILE_UNSUPPORTED:
+			rb_raise(rb_eFileUnsupported, "%s", mess);
+		case LIBRAW_REQUEST_FOR_NONEXISTENT_IMAGE:
+			rb_raise(rb_eRequestForNonexistentImage, "%s", mess);
+		case LIBRAW_OUT_OF_ORDER_CALL:
+			rb_raise(rb_eOutOfOrderCall, "%s", mess);
+		case LIBRAW_NO_THUMBNAIL:
+			rb_raise(rb_eNoThumbnail, "%s", mess);
+		case LIBRAW_UNSUPPORTED_THUMBNAIL:
+			rb_raise(rb_eUnsupportedThumbnail, "%s", mess);
+		case LIBRAW_INPUT_CLOSED:
+			rb_raise(rb_eInputClosed, "%s", mess);
+		case LIBRAW_UNSUFFICIENT_MEMORY:
+			rb_raise(rb_eUnsufficientMemory, "%s", mess);
+		case LIBRAW_DATA_ERROR:
+			rb_raise(rb_eDataError, "%s", mess);
+		case LIBRAW_IO_ERROR:
+			rb_raise(rb_eIOError, "%s", mess);
+		case LIBRAW_CANCELLED_BY_CALLBACK:
+			rb_raise(rb_eCancelledByCallback, "%s", mess);
+		case LIBRAW_BAD_CROP:
+			rb_raise(rb_eBadCrop, "%s", mess);
+		default:
+			rb_raise(rb_eRawError, "%s", mess);
+		}
 	}
 }
 
 
 // LibRaw::RawObject
+
+void apply_rawobject(VALUE self)
+{
+	LibRaw *raw = get_lib_raw(self);
+	if (raw) {
+		apply_data(self, &raw->imgdata);
+	}
+}
+
+void apply_data(VALUE self, libraw_data_t *p)
+{
+	if (p) {
+		// size
+		VALUE size = rb_iv_get(self, "@size");
+		if (size==Qnil) {
+			size = rb_class_new_instance(0, NULL, rb_cImageSize);
+			rb_iv_set(self, "@size", size);
+		}
+		apply_image_size(size, &p->sizes);
+
+		// idata
+		VALUE idata = rb_iv_get(self, "@idata");
+		if (idata==Qnil) {
+			idata = rb_class_new_instance(0, NULL, rb_cIParam);
+			rb_iv_set(self, "@idata", idata);
+		}
+		apply_iparam(idata, &p->idata);
+
+		// lens
+		VALUE lens = rb_iv_get(self, "@lens");
+		if (lens==Qnil) {
+			lens = rb_class_new_instance(0, NULL, rb_cLensInfo);
+			rb_iv_set(self, "@lens", lens);
+		}
+		apply_lensinfo(lens, &p->lens);
+
+		// TODO: params
+
+		// TODO: color
+/*
+		VALUE color = rb_iv_get(self, "@color");
+		if (color==Qnil) {
+			color = rb_class_new_instance(0, NULL, rb_cColorData);
+			rb_iv_set(self, "@color", color);
+		}
+		apply_colordata(color, &p->color);
+*/
+
+		// other
+		VALUE other = rb_iv_get(self, "@other");
+		if (other==Qnil) {
+			other = rb_class_new_instance(0, NULL, rb_cImgOther);
+			rb_iv_set(self, "@other", other);
+		}
+		apply_imgother(other, &p->other);
+
+		// param
+		VALUE param = rb_iv_get(self, "@param");
+		if (param==Qnil) {
+			param = rb_class_new_instance(0, NULL, rb_cOutputParam);
+			rb_iv_set(self, "@param", param);
+		}
+		apply_output_param(param, &p->params);
+	}
+}
 
 VALUE rb_raw_object_initialize(VALUE self)
 {
@@ -89,6 +211,8 @@ VALUE rb_raw_object_initialize(VALUE self)
 	VALUE resource = Data_Wrap_Struct(CLASS_OF(self), 0, lib_raw_native_resource_delete, p);
 	rb_iv_set(self, "lib_raw_native_resource", resource);
 
+	apply_data(self, &p->libraw->imgdata);
+
 	return self;
 }
 
@@ -98,8 +222,10 @@ VALUE rb_raw_object_open_file(VALUE self, VALUE filename)
 
 	char *name = RSTRING_PTR(rb_obj_as_string(filename));
 	int ret = libraw->open_file(name);
+	apply_rawobject(self);
+	check_errors(ret);
 
-	return INT2NUM(ret);
+	return Qtrue;
 }
 
 VALUE rb_raw_object_open_buffer(VALUE self, VALUE buff)
@@ -107,8 +233,10 @@ VALUE rb_raw_object_open_buffer(VALUE self, VALUE buff)
 	LibRaw *libraw = get_lib_raw(self);
 
 	int ret = libraw->open_buffer(RSTRING_PTR(buff), RSTRING_LEN(buff));
+	apply_rawobject(self);
+	check_errors(ret);
 
-	return INT2NUM(ret);
+	return Qtrue;
 }
 
 VALUE rb_raw_object_unpack(VALUE self)
@@ -116,8 +244,9 @@ VALUE rb_raw_object_unpack(VALUE self)
 	LibRaw *libraw = get_lib_raw(self);
 
 	int ret = libraw->unpack();
+	check_errors(ret);
 
-	return INT2NUM(ret);
+	return Qtrue;
 }
 
 VALUE rb_raw_object_unpack_thumb(VALUE self)
@@ -125,133 +254,453 @@ VALUE rb_raw_object_unpack_thumb(VALUE self)
 	LibRaw *libraw = get_lib_raw(self);
 
 	int ret = libraw->unpack_thumb();
+	check_errors(ret);
 
-	return INT2NUM(ret);
+	return Qtrue;
+}
+
+VALUE rb_raw_object_recycle_datastream(VALUE self)
+{
+	LibRaw *libraw = get_lib_raw(self);
+
+	libraw->recycle_datastream();
+
+	return Qnil;
+}
+
+VALUE rb_raw_object_recycle(VALUE self)
+{
+	LibRaw *libraw = get_lib_raw(self);
+
+	libraw->recycle();
+
+	return Qnil;
+}
+
+VALUE rb_raw_object_dcraw_ppm_tiff_writer(VALUE self, VALUE filename)
+{
+	LibRaw *libraw = get_lib_raw(self);
+
+	const char *name = RSTRING_PTR(filename);
+	int ret = libraw->dcraw_ppm_tiff_writer(name);
+	check_errors(ret);
+
+	return Qtrue;
+}
+
+VALUE rb_raw_object_dcraw_thumb_writer(VALUE self, VALUE filename)
+{
+	LibRaw *libraw = get_lib_raw(self);
+
+	const char *name = RSTRING_PTR(filename);
+	int ret = libraw->dcraw_thumb_writer(name);
+	check_errors(ret);
+
+	return Qtrue;
+}
+
+VALUE rb_raw_object_dcraw_process(VALUE self, VALUE param)
+{
+	LibRaw *libraw = get_lib_raw(self);
+	libraw_output_params_t *params = get_output_params(param);
+
+	memmove(&libraw->imgdata.params, params, sizeof(libraw_output_params_t));
+
+	int ret = libraw->dcraw_process();
+	check_errors(ret);
+
+	return Qtrue;
 }
 
 
-// LibRaw::ImgData
+// LibRaw::IParam
 
-VALUE rb_image_size_initialize(VALUE self, VALUE raw)
+void apply_iparam(VALUE self, libraw_iparams_t *p)
 {
-	copy_lib_raw(self, raw);
+	if (p) {
+		rb_iv_set(self, "@make", rb_str_new2(p->make));
+		rb_iv_set(self, "@model", rb_str_new2(p->model));
+		rb_iv_set(self, "@software", rb_str_new2(p->software));
+		rb_iv_set(self, "@raw_count", INT2FIX(p->raw_count));
+		rb_iv_set(self, "@dng_version", INT2FIX(p->dng_version));
+		rb_iv_set(self, "@is_foveon", p->is_foveon ? Qtrue : Qfalse);
+		rb_iv_set(self, "@colors", INT2FIX(p->colors));
+		rb_iv_set(self, "@filters", INT2FIX(p->filters));
+		rb_iv_set(self, "@cdesc", rb_str_new2(p->cdesc));
+	}
+}
+
+
+// LibRaw::ImageSize
+
+void apply_image_size(VALUE self, libraw_image_sizes_t *p)
+{
+	if (p) {
+		rb_iv_set(self, "@raw_height", INT2FIX(p->raw_height));
+		rb_iv_set(self, "@raw_width", INT2FIX(p->raw_width));
+		rb_iv_set(self, "@height", INT2FIX(p->height));
+		rb_iv_set(self, "@width", INT2FIX(p->width));
+		rb_iv_set(self, "@top_margin", INT2FIX(p->top_margin));
+		rb_iv_set(self, "@left_margin", INT2FIX(p->left_margin));
+		rb_iv_set(self, "@iheight", INT2FIX(p->iheight));
+		rb_iv_set(self, "@iwidth", INT2FIX(p->iwidth));
+		rb_iv_set(self, "@raw_pitch", INT2FIX(p->raw_pitch));
+		rb_iv_set(self, "@pixel_aspect", rb_float_new(p->pixel_aspect));
+		rb_iv_set(self, "@flip", INT2FIX(p->flip));
+	}
+}
+
+
+// LibRaw::ColorData
+
+void apply_colordata(VALUE self, libraw_colordata_t *p)
+{
+	if (p) {
+		// TODO
+	}
+}
+
+
+// LibRaw::ImgOther
+
+void apply_imgother(VALUE self, libraw_imgother_t *p)
+{
+	if (p) {
+		rb_iv_set(self, "@iso_speed", rb_float_new(p->iso_speed));
+		rb_iv_set(self, "@shutter", rb_float_new(p->shutter));
+		rb_iv_set(self, "@aperture", rb_float_new(p->aperture));
+		rb_iv_set(self, "@focal_len", rb_float_new(p->focal_len));
+		rb_iv_set(self, "@timestamp", INT2FIX(p->timestamp));
+		rb_iv_set(self, "@shot_order", INT2FIX(p->shot_order));
+		rb_iv_set(self, "@desc", rb_str_new2(p->desc));
+		rb_iv_set(self, "@artist", rb_str_new2(p->artist));
+
+		// TODO: parsed_gps
+	}
+}
+
+
+// LibRaw::OutputParam
+
+VALUE rb_output_param_initialize(VALUE self)
+{
+	OutputParamNativeResource *p = ALLOC(OutputParamNativeResource);
+
+
+	memset(&p->params, 0, sizeof(libraw_output_params_t));
+
+	double aber[4] = {1,1,1,1};
+	double gamm[6] = { 0.45,4.5,0,0,0,0 };
+	unsigned greybox[4] =  { 0, 0, UINT_MAX, UINT_MAX };
+	unsigned cropbox[4] =  { 0, 0, UINT_MAX, UINT_MAX };
+
+	memmove(&p->params.aber,&aber,sizeof(aber));
+	memmove(&p->params.gamm,&gamm,sizeof(gamm));
+	memmove(&p->params.greybox,&greybox,sizeof(greybox));
+	memmove(&p->params.cropbox,&cropbox,sizeof(cropbox));
+
+	p->params.bright=1;
+	p->params.use_camera_matrix=1;
+	p->params.user_flip=-1;
+	p->params.user_black=-1;
+	p->params.user_cblack[0]=p->params.user_cblack[1]=p->params.user_cblack[2]=p->params.user_cblack[3]=-1000001;
+	p->params.user_sat=-1;
+	p->params.user_qual=-1;
+	p->params.output_color=1;
+	p->params.output_bps=8;
+	p->params.use_fuji_rotate=1;
+	p->params.exp_shift = 1.0; 
+	p->params.auto_bright_thr = LIBRAW_DEFAULT_AUTO_BRIGHTNESS_THRESHOLD;
+	p->params.adjust_maximum_thr= LIBRAW_DEFAULT_ADJUST_MAXIMUM_THRESHOLD;
+	p->params.use_rawspeed = 1; 
+	p->params.no_auto_scale = 0; 
+	p->params.no_interpolation = 0; 
+	p->params.sraw_ycc = 0; 
+	p->params.force_foveon_x3f = 0; 
+	p->params.x3f_flags = LIBRAW_DP2Q_INTERPOLATERG|LIBRAW_DP2Q_INTERPOLATEAF;
+	p->params.sony_arw2_options = 0; 
+	p->params.sony_arw2_posterization_thr = 0; 
+	p->params.green_matching = 0; 
+	p->params.coolscan_nef_gamma = 1.0f;
+
+
+	VALUE resource = Data_Wrap_Struct(CLASS_OF(self), 0, output_param_native_resource_delete, p);
+	rb_iv_set(self, "output_param_native_resource", resource);
+
+	apply_output_param(self, &p->params);
+
 	return self;
 }
 
-VALUE rb_image_size_raw_height(VALUE self)
+void apply_output_param(VALUE self, libraw_output_params_t *p)
 {
-	LibRaw *libraw = get_lib_raw(self);
-	if (libraw==NULL) {
-		return Qnil;
-	}
+	if (p) {
+		// TODO: greybox
+		// TODO: cropbox
+		// TODO: aber
+		// TODO: gamm
+		// TODO: user_mul
+		rb_iv_set(self, "@shot_select", INT2FIX(p->shot_select));
+		rb_iv_set(self, "@bright", rb_float_new(p->bright));
+		rb_iv_set(self, "@threshold", rb_float_new(p->threshold));
+		rb_iv_set(self, "@half_size", INT2FIX(p->half_size));
+		rb_iv_set(self, "@four_color_rgb", INT2FIX(p->four_color_rgb));
+		rb_iv_set(self, "@highlight", INT2FIX(p->highlight));
+		rb_iv_set(self, "@use_auto_wb", p->use_auto_wb ? Qtrue : Qfalse);
+		rb_iv_set(self, "@use_camera_wb", p->use_camera_wb ? Qtrue : Qfalse);
+		rb_iv_set(self, "@use_camera_matrix", p->use_camera_matrix ? Qtrue : Qfalse);
+		rb_iv_set(self, "@output_color", INT2FIX(p->output_color));
+		// TODO: output_profile
+		// TODO: camera_profile
+		// TODO: bad_pixels
+		// TODO: dark_frame
+		rb_iv_set(self, "@output_bps", INT2FIX(p->output_bps));
+		rb_iv_set(self, "@output_tiff", INT2FIX(p->output_tiff));
+		rb_iv_set(self, "@user_flip", INT2FIX(p->user_flip));
+		rb_iv_set(self, "@user_qual", INT2FIX(p->user_qual));
+		rb_iv_set(self, "@user_black", INT2FIX(p->user_black));
+		// TODO: user_cblack
+		rb_iv_set(self, "@user_sat", INT2FIX(p->user_sat));
+		rb_iv_set(self, "@med_passes", INT2FIX(p->med_passes));
+		rb_iv_set(self, "@auto_bright_thr", rb_float_new(p->auto_bright_thr));
+		rb_iv_set(self, "@adjust_maximum_thr", rb_float_new(p->adjust_maximum_thr));
+		rb_iv_set(self, "@no_auto_bright", p->no_auto_bright ? Qtrue : Qfalse);
+		rb_iv_set(self, "@use_fuji_rotate", p->use_fuji_rotate ? Qtrue : Qfalse);
+		rb_iv_set(self, "@green_matching", INT2FIX(p->green_matching));
 
-	return INT2FIX(libraw->imgdata.sizes.raw_height);
+		// DCB parameters
+		rb_iv_set(self, "@dcb_iterations", INT2FIX(p->dcb_iterations));
+		rb_iv_set(self, "@dcb_enhance_fl", INT2FIX(p->dcb_enhance_fl));
+		rb_iv_set(self, "@fbdd_noiserd", INT2FIX(p->fbdd_noiserd));
+
+		// VCD parameters
+		rb_iv_set(self, "@eeci_refine", INT2FIX(p->eeci_refine));
+		rb_iv_set(self, "@es_med_passes", INT2FIX(p->es_med_passes));
+
+		// AMaZE
+		rb_iv_set(self, "@ca_correc", INT2FIX(p->ca_correc));
+		rb_iv_set(self, "@cared", rb_float_new(p->cared));
+		rb_iv_set(self, "@cablue", rb_float_new(p->cablue));
+		rb_iv_set(self, "@cfaline", INT2FIX(p->cfaline));
+		rb_iv_set(self, "@linenoise", rb_float_new(p->linenoise));
+		rb_iv_set(self, "@cfa_clean", INT2FIX(p->cfa_clean));
+		rb_iv_set(self, "@lclean", rb_float_new(p->lclean));
+		rb_iv_set(self, "@cclean", rb_float_new(p->cclean));
+		rb_iv_set(self, "@cfa_green", INT2FIX(p->cfa_green));
+		rb_iv_set(self, "@green_thresh", rb_float_new(p->green_thresh));
+		rb_iv_set(self, "@exp_correc", INT2FIX(p->exp_correc));
+		rb_iv_set(self, "@exp_shift", rb_float_new(p->exp_shift));
+		rb_iv_set(self, "@exp_preser", rb_float_new(p->exp_preser));
+
+		// WF debanding
+		rb_iv_set(self, "@wf_debanding", INT2FIX(p->wf_debanding));
+		// TODO: wf_deband_treshold
+
+		// Raw speed
+		rb_iv_set(self, "@use_rawspeed", p->use_rawspeed ? Qtrue : Qfalse);
+
+		// Disable Auto-scale
+		rb_iv_set(self, "@no_auto_scale", p->no_auto_scale ? Qtrue : Qfalse);
+
+		// Disable intepolation
+		rb_iv_set(self, "@no_interpolation", p->no_interpolation ? Qtrue : Qfalse);
+
+		// Disable sRAW YCC to RGB conversion
+		rb_iv_set(self, "@sraw_ycc", INT2FIX(p->sraw_ycc));
+
+		// Force use x3f data decoding either if demosaic pack GPL2 enabled
+		rb_iv_set(self, "@force_foveon_x3f", INT2FIX(p->force_foveon_x3f));
+		rb_iv_set(self, "@x3f_flags", INT2FIX(p->x3f_flags));
+
+		// Sony ARW2 digging mode
+		rb_iv_set(self, "@sony_arw2_options", INT2FIX(p->sony_arw2_options));
+		rb_iv_set(self, "@sony_arw2_posterization_thr", INT2FIX(p->sony_arw2_posterization_thr));
+
+		// Nikon Coolscan
+		rb_iv_set(self, "@coolscan_nef_gamma", rb_float_new(p->coolscan_nef_gamma));
+	}
 }
 
-VALUE rb_image_size_raw_width(VALUE self)
+VALUE rb_output_param_greybox(VALUE self, VALUE x, VALUE y, VALUE w, VALUE h)
 {
-	LibRaw *libraw = get_lib_raw(self);
-	if (libraw==NULL) {
-		return Qnil;
-	}
+	libraw_output_params_t *params = get_output_params(self);
 
-	return INT2FIX(libraw->imgdata.sizes.raw_width);
+	params->greybox[0] = NUM2LONG(x);
+	params->greybox[1] = NUM2LONG(y);
+	params->greybox[2] = NUM2LONG(w);
+	params->greybox[3] = NUM2LONG(h);
+
+	apply_output_param(self, params);
+
+	return self;
 }
 
-VALUE rb_image_size_height(VALUE self)
+VALUE rb_output_param_cropbox(VALUE self, VALUE x, VALUE y, VALUE w, VALUE h)
 {
-	LibRaw *libraw = get_lib_raw(self);
-	if (libraw==NULL) {
-		return Qnil;
-	}
+	libraw_output_params_t *params = get_output_params(self);
 
-	return INT2FIX(libraw->imgdata.sizes.height);
+	params->cropbox[0]= NUM2LONG(x);
+	params->cropbox[1]= NUM2LONG(y);
+	params->cropbox[2]= NUM2LONG(w);
+	params->cropbox[3]= NUM2LONG(h);
+
+	apply_output_param(self, params);
+
+	return self;
 }
 
-VALUE rb_image_size_width(VALUE self)
+VALUE rb_output_param_gamma(VALUE self, VALUE pwr, VALUE ts)
 {
-	LibRaw *libraw = get_lib_raw(self);
-	if (libraw==NULL) {
-		return Qnil;
-	}
+	libraw_output_params_t *params = get_output_params(self);
 
-	return INT2FIX(libraw->imgdata.sizes.width);
+	params->gamm[0] = RFLOAT_VALUE(rb_Float(pwr));
+	params->gamm[1] = RFLOAT_VALUE(rb_Float(ts));
+
+	apply_output_param(self, params);
+
+	return self;
 }
 
-VALUE rb_image_size_top_margin(VALUE self)
+VALUE rb_output_param_whitebalance(VALUE self, VALUE r, VALUE g, VALUE b, VALUE g2)
 {
-	LibRaw *libraw = get_lib_raw(self);
-	if (libraw==NULL) {
-		return Qnil;
-	}
+	libraw_output_params_t *params = get_output_params(self);
 
-	return INT2FIX(libraw->imgdata.sizes.top_margin);
+	params->user_mul[0] = RFLOAT_VALUE(rb_Float(r));
+	params->user_mul[1] = RFLOAT_VALUE(rb_Float(g));
+	params->user_mul[2] = RFLOAT_VALUE(rb_Float(b));
+	params->user_mul[3] = RFLOAT_VALUE(rb_Float(g2));
+
+	apply_output_param(self, params);
+
+	return self;
 }
 
-VALUE rb_image_size_left_margin(VALUE self)
+VALUE rb_output_param_set_bright(VALUE self, VALUE val)
 {
-	LibRaw *libraw = get_lib_raw(self);
-	if (libraw==NULL) {
-		return Qnil;
-	}
+	libraw_output_params_t *params = get_output_params(self);
 
-	return INT2FIX(libraw->imgdata.sizes.left_margin);
+	params->bright = RFLOAT_VALUE(rb_Float(val));
+
+	apply_output_param(self, params);
+
+	return self;
 }
 
-VALUE rb_image_size_iheight(VALUE self)
+VALUE rb_output_param_set_highlight(VALUE self, VALUE val)
 {
-	LibRaw *libraw = get_lib_raw(self);
-	if (libraw==NULL) {
-		return Qnil;
-	}
+	libraw_output_params_t *params = get_output_params(self);
 
-	return INT2FIX(libraw->imgdata.sizes.iheight);
+	params->highlight = NUM2LONG(val);
+
+	apply_output_param(self, params);
+
+	return self;
 }
 
-VALUE rb_image_size_iwidth(VALUE self)
+VALUE rb_output_param_set_use_auto_wb(VALUE self, VALUE val)
 {
-	LibRaw *libraw = get_lib_raw(self);
-	if (libraw==NULL) {
-		return Qnil;
-	}
+	libraw_output_params_t *params = get_output_params(self);
 
-	return INT2FIX(libraw->imgdata.sizes.iwidth);
+	params->use_auto_wb = !(val==Qnil || val==Qfalse);
+
+	apply_output_param(self, params);
+
+	return self;
 }
 
-VALUE rb_image_size_raw_pitch(VALUE self)
+VALUE rb_output_param_set_use_camera_wb(VALUE self, VALUE val)
 {
-	LibRaw *libraw = get_lib_raw(self);
-	if (libraw==NULL) {
-		return Qnil;
-	}
+	libraw_output_params_t *params = get_output_params(self);
 
-	return INT2FIX(libraw->imgdata.sizes.raw_pitch);
+	params->use_camera_wb = !(val==Qnil || val==Qfalse);
+
+	apply_output_param(self, params);
+
+	return self;
 }
 
-VALUE rb_image_size_pixel_aspect(VALUE self)
+VALUE rb_output_param_set_fbdd_noiserd(VALUE self, VALUE val)
 {
-	LibRaw *libraw = get_lib_raw(self);
-	if (libraw==NULL) {
-		return Qnil;
-	}
+	libraw_output_params_t *params = get_output_params(self);
 
-	return rb_float_new(libraw->imgdata.sizes.pixel_aspect);
-}
+	params->fbdd_noiserd = NUM2LONG(val);
 
-VALUE rb_image_size_flip(VALUE self)
-{
-	LibRaw *libraw = get_lib_raw(self);
-	if (libraw==NULL) {
-		return Qnil;
-	}
+	apply_output_param(self, params);
 
-	return INT2FIX(libraw->imgdata.sizes.flip);
+	return self;
 }
 
 
+// LibRaw::MakerNote
 
-extern "C" {
-void Init_lib_raw(void)
+void apply_makernote(VALUE self, libraw_makernotes_lens_t *p)
+{
+	if (p) {
+		rb_iv_set(self, "@lens_id", INT2FIX(p->LensID));
+		rb_iv_set(self, "@lens", rb_str_new2(p->Lens));
+		rb_iv_set(self, "@lens_format", INT2FIX(p->LensFormat));
+		rb_iv_set(self, "@lens_mount", INT2FIX(p->LensMount));
+		rb_iv_set(self, "@cam_id", INT2FIX(p->CamID));
+		rb_iv_set(self, "@camera_format", INT2FIX(p->CameraFormat));
+		rb_iv_set(self, "@camera_mount", INT2FIX(p->CameraMount));
+		rb_iv_set(self, "@body", rb_str_new2(p->body));
+		rb_iv_set(self, "@focal_type", INT2FIX(p->FocalType));
+		rb_iv_set(self, "@lens_features_pre", rb_str_new2(p->LensFeatures_pre));
+		rb_iv_set(self, "@lens_features_suf", rb_str_new2(p->LensFeatures_suf));
+		rb_iv_set(self, "@min_focal", rb_float_new(p->MinFocal));
+		rb_iv_set(self, "@max_focal", rb_float_new(p->MaxFocal));
+		rb_iv_set(self, "@max_ap_4_min_focal", rb_float_new(p->MaxAp4MinFocal));
+		rb_iv_set(self, "@max_ap_4_max_focal", rb_float_new(p->MaxAp4MaxFocal));
+		rb_iv_set(self, "@min_ap_4_min_focal", rb_float_new(p->MinAp4MinFocal));
+		rb_iv_set(self, "@min_ap_4_max_focal", rb_float_new(p->MinAp4MaxFocal));
+		rb_iv_set(self, "@max_ap", rb_float_new(p->MaxAp));
+		rb_iv_set(self, "@min_ap", rb_float_new(p->MinAp));
+		rb_iv_set(self, "@cur_focal", rb_float_new(p->CurFocal));
+		rb_iv_set(self, "@cur_ap", rb_float_new(p->CurAp));
+		rb_iv_set(self, "@max_ap_4_cur_focal", rb_float_new(p->MaxAp4CurFocal));
+		rb_iv_set(self, "@min_ap_4_cur_focal", rb_float_new(p->MinAp4CurFocal));
+		rb_iv_set(self, "@lens_f_stops", rb_float_new(p->LensFStops));
+		rb_iv_set(self, "@teleconverter_id", INT2FIX(p->TeleconverterID));
+		rb_iv_set(self, "@teleconverter", rb_str_new2(p->Teleconverter));
+		rb_iv_set(self, "@adapter_id", INT2FIX(p->AdapterID));
+		rb_iv_set(self, "@adapter", rb_str_new2(p->Adapter));
+		rb_iv_set(self, "@attachment_id", INT2FIX(p->AttachmentID));
+		rb_iv_set(self, "@attachment", rb_str_new2(p->Attachment));
+		rb_iv_set(self, "@canon_focal_units", INT2FIX(p->CanonFocalUnits));
+		rb_iv_set(self, "@focal_length_in_35mm_format", rb_float_new(p->FocalLengthIn35mmFormat));
+	}
+}
+
+
+// LibRaw::LensInfo
+
+void apply_lensinfo(VALUE self, libraw_lensinfo_t *p)
+{
+	if (p) {
+		rb_iv_set(self, "@min_focal", rb_float_new(p->MinFocal));
+		rb_iv_set(self, "@max_focal", rb_float_new(p->MaxFocal));
+		rb_iv_set(self, "@max_ap_4_min_focal", rb_float_new(p->MaxAp4MinFocal));
+		rb_iv_set(self, "@max_ap_4_max_focal", rb_float_new(p->MaxAp4MaxFocal));
+		rb_iv_set(self, "@exif_max_ap", rb_float_new(p->EXIF_MaxAp));
+		rb_iv_set(self, "@lens_make", rb_str_new2(p->LensMake));
+		rb_iv_set(self, "@lens", rb_str_new2(p->Lens));
+		rb_iv_set(self, "@focal_length_in_35mm_format", INT2FIX(p->FocalLengthIn35mmFormat));
+		// TODO: nikon
+		// TODO: dng
+
+		// makernotes
+		VALUE makernotes = rb_iv_get(self, "@makernotes");
+		if (makernotes==Qnil) {
+			makernotes = rb_class_new_instance(0, NULL, rb_cMakerNote);
+			rb_iv_set(self, "@makernotes", makernotes);
+		}
+		apply_makernote(makernotes, &p->makernotes);
+	}
+}
+
+
+
+extern "C" void Init_lib_raw(void)
 {
 	rb_mLibRaw = rb_define_module("LibRaw");
 
@@ -259,6 +708,7 @@ void Init_lib_raw(void)
 	// const
 
 	// LibRaw::ColormatrixType
+
 	rb_mColormatrixType = rb_define_module_under(rb_mLibRaw, "ColormatrixType");
 
 	rb_define_const(rb_mColormatrixType, "NONE", INT2FIX(LIBRAW_CMATRIX_NONE));
@@ -280,7 +730,7 @@ void Init_lib_raw(void)
 	rb_define_const(rb_mCameraMount, "Nikon_F", INT2FIX(LIBRAW_MOUNT_Nikon_F));
 	rb_define_const(rb_mCameraMount, "Nikon_CX", INT2FIX(LIBRAW_MOUNT_Nikon_CX));
 	rb_define_const(rb_mCameraMount, "FT", INT2FIX(LIBRAW_MOUNT_FT));
-	rb_define_const(rb_mCameraMount, "mFT", INT2FIX(LIBRAW_MOUNT_mFT));
+	rb_define_const(rb_mCameraMount, "MFT", INT2FIX(LIBRAW_MOUNT_mFT));
 	rb_define_const(rb_mCameraMount, "Pentax_K", INT2FIX(LIBRAW_MOUNT_Pentax_K));
 	rb_define_const(rb_mCameraMount, "Pentax_Q", INT2FIX(LIBRAW_MOUNT_Pentax_Q));
 	rb_define_const(rb_mCameraMount, "Pentax_645", INT2FIX(LIBRAW_MOUNT_Pentax_645));
@@ -425,29 +875,200 @@ void Init_lib_raw(void)
 
 	rb_cRawObject = rb_define_class_under(rb_mLibRaw, "RawObject", rb_cObject);
 
+	rb_define_attr(rb_cRawObject, "size", 1, 0);
+	rb_define_attr(rb_cRawObject, "idata", 1, 0);
+	rb_define_attr(rb_cRawObject, "lens", 1, 0);
+	rb_define_attr(rb_cRawObject, "other", 1, 0);
+	rb_define_attr(rb_cRawObject, "param", 1, 0);
+
 	rb_define_method(rb_cRawObject, "initialize", RUBY_METHOD_FUNC(rb_raw_object_initialize), 0);
 	rb_define_method(rb_cRawObject, "open_file", RUBY_METHOD_FUNC(rb_raw_object_open_file), 1);
 	rb_define_method(rb_cRawObject, "open_buffer", RUBY_METHOD_FUNC(rb_raw_object_open_buffer), 1);
 	rb_define_method(rb_cRawObject, "unpack", RUBY_METHOD_FUNC(rb_raw_object_unpack), 0);
 	rb_define_method(rb_cRawObject, "unpack_thumb", RUBY_METHOD_FUNC(rb_raw_object_unpack_thumb), 0);
+	rb_define_method(rb_cRawObject, "recycle_datastream", RUBY_METHOD_FUNC(rb_raw_object_recycle_datastream), 0);
+	rb_define_method(rb_cRawObject, "recycle", RUBY_METHOD_FUNC(rb_raw_object_recycle), 0);
+	rb_define_method(rb_cRawObject, "dcraw_ppm_tiff_writer", RUBY_METHOD_FUNC(rb_raw_object_dcraw_ppm_tiff_writer), 1);
+	rb_define_method(rb_cRawObject, "dcraw_thumb_writer", RUBY_METHOD_FUNC(rb_raw_object_dcraw_thumb_writer), 1);
+	rb_define_method(rb_cRawObject, "dcraw_process", RUBY_METHOD_FUNC(rb_raw_object_dcraw_process), 1);
+
+
+	// LibRaw::IParam
+
+	rb_cIParam = rb_define_class_under(rb_mLibRaw, "IParam", rb_cObject);
+
+	rb_define_attr(rb_cIParam, "make", 1, 0);
+	rb_define_attr(rb_cIParam, "model", 1, 0);
+	rb_define_attr(rb_cIParam, "software", 1, 0);
+	rb_define_attr(rb_cIParam, "raw_count", 1, 0);
+	rb_define_attr(rb_cIParam, "dng_version", 1, 0);
+	rb_define_attr(rb_cIParam, "is_foveon", 1, 0);
+	rb_define_attr(rb_cIParam, "colors", 1, 0);
+	rb_define_attr(rb_cIParam, "filters", 1, 0);
+	rb_define_attr(rb_cIParam, "cdesc", 1, 0);
 
 
 	// LibRaw::ImageSize
 
 	rb_cImageSize = rb_define_class_under(rb_mLibRaw, "ImageSize", rb_cObject);
 
-	rb_define_method(rb_cImageSize, "initialize", RUBY_METHOD_FUNC(rb_image_size_initialize), 1);
-	rb_define_method(rb_cImageSize, "rb_image_size_raw_height", RUBY_METHOD_FUNC(rb_image_size_raw_height), 0);
-	rb_define_method(rb_cImageSize, "rb_image_size_raw_width", RUBY_METHOD_FUNC(rb_image_size_raw_width), 0);
-	rb_define_method(rb_cImageSize, "rb_image_size_height", RUBY_METHOD_FUNC(rb_image_size_height), 0);
-	rb_define_method(rb_cImageSize, "rb_image_size_width", RUBY_METHOD_FUNC(rb_image_size_width), 0);
-	rb_define_method(rb_cImageSize, "rb_image_size_top_margin", RUBY_METHOD_FUNC(rb_image_size_top_margin), 0);
-	rb_define_method(rb_cImageSize, "rb_image_size_left_margin", RUBY_METHOD_FUNC(rb_image_size_left_margin), 0);
-	rb_define_method(rb_cImageSize, "rb_image_size_iheight", RUBY_METHOD_FUNC(rb_image_size_iheight), 0);
-	rb_define_method(rb_cImageSize, "rb_image_size_iwidth", RUBY_METHOD_FUNC(rb_image_size_iwidth), 0);
-	rb_define_method(rb_cImageSize, "rb_image_size_raw_pitch", RUBY_METHOD_FUNC(rb_image_size_raw_pitch), 0);
-	rb_define_method(rb_cImageSize, "rb_image_size_pixel_aspect", RUBY_METHOD_FUNC(rb_image_size_pixel_aspect), 0);
-	rb_define_method(rb_cImageSize, "rb_image_size_flip", RUBY_METHOD_FUNC(rb_image_size_flip), 0);
+	rb_define_attr(rb_cImageSize, "raw_height", 1, 0);
+	rb_define_attr(rb_cImageSize, "raw_width", 1, 0);
+	rb_define_attr(rb_cImageSize, "height", 1, 0);
+	rb_define_attr(rb_cImageSize, "width", 1, 0);
+	rb_define_attr(rb_cImageSize, "top_margin", 1, 0);
+	rb_define_attr(rb_cImageSize, "left_margin", 1, 0);
+	rb_define_attr(rb_cImageSize, "iheight", 1, 0);
+	rb_define_attr(rb_cImageSize, "iwidth", 1, 0);
+	rb_define_attr(rb_cImageSize, "raw_pitch", 1, 0);
+	rb_define_attr(rb_cImageSize, "pixel_aspect", 1, 0);
+	rb_define_attr(rb_cImageSize, "flip", 1, 0);
+
+
+	// LibRaw::ImgOther
+
+	rb_cImgOther = rb_define_class_under(rb_mLibRaw, "ImgOther", rb_cObject);
+
+	rb_define_attr(rb_cImgOther, "iso_speed", 1, 0);
+	rb_define_attr(rb_cImgOther, "shutter", 1, 0);
+	rb_define_attr(rb_cImgOther, "aperture", 1, 0);
+	rb_define_attr(rb_cImgOther, "focal_len", 1, 0);
+	rb_define_attr(rb_cImgOther, "timestamp", 1, 0);
+	rb_define_attr(rb_cImgOther, "shot_order", 1, 0);
+	rb_define_attr(rb_cImgOther, "desc", 1, 0);
+	rb_define_attr(rb_cImgOther, "artist", 1, 0);
+
+
+	// LibRaw::OutputParam
+
+	rb_cOutputParam = rb_define_class_under(rb_mLibRaw, "OutputParam", rb_cObject);
+
+	rb_define_attr(rb_cOutputParam, "shot_select", 1, 0);
+	rb_define_attr(rb_cOutputParam, "bright", 1, 0);
+	rb_define_attr(rb_cOutputParam, "threshold", 1, 0);
+	rb_define_attr(rb_cOutputParam, "half_size", 1, 0);
+	rb_define_attr(rb_cOutputParam, "four_color_rgb", 1, 0);
+	rb_define_attr(rb_cOutputParam, "highlight", 1, 0);
+	rb_define_attr(rb_cOutputParam, "use_auto_wb", 1, 0);
+	rb_define_attr(rb_cOutputParam, "use_camera_wb", 1, 0);
+	rb_define_attr(rb_cOutputParam, "use_camera_matrix", 1, 0);
+	rb_define_attr(rb_cOutputParam, "output_color", 1, 0);
+	rb_define_attr(rb_cOutputParam, "output_bps", 1, 0);
+	rb_define_attr(rb_cOutputParam, "output_tiff", 1, 0);
+	rb_define_attr(rb_cOutputParam, "user_flip", 1, 0);
+	rb_define_attr(rb_cOutputParam, "user_qual", 1, 0);
+	rb_define_attr(rb_cOutputParam, "user_black", 1, 0);
+	rb_define_attr(rb_cOutputParam, "user_sat", 1, 0);
+	rb_define_attr(rb_cOutputParam, "med_passes", 1, 0);
+	rb_define_attr(rb_cOutputParam, "auto_bright_thr", 1, 0);
+	rb_define_attr(rb_cOutputParam, "adjust_maximum_thr", 1, 0);
+	rb_define_attr(rb_cOutputParam, "no_auto_bright", 1, 0);
+	rb_define_attr(rb_cOutputParam, "use_fuji_rotate", 1, 0);
+	rb_define_attr(rb_cOutputParam, "green_matching", 1, 0);
+
+	rb_define_attr(rb_cOutputParam, "dcb_iterations", 1, 0);
+	rb_define_attr(rb_cOutputParam, "dcb_enhance_fl", 1, 0);
+	rb_define_attr(rb_cOutputParam, "fbdd_noiserd", 1, 0);
+
+	rb_define_attr(rb_cOutputParam, "eeci_refine", 1, 0);
+	rb_define_attr(rb_cOutputParam, "es_med_passes", 1, 0);
+
+	rb_define_attr(rb_cOutputParam, "ca_correc", 1, 0);
+	rb_define_attr(rb_cOutputParam, "cared", 1, 0);
+	rb_define_attr(rb_cOutputParam, "cablue", 1, 0);
+	rb_define_attr(rb_cOutputParam, "cfaline", 1, 0);
+	rb_define_attr(rb_cOutputParam, "linenoise", 1, 0);
+	rb_define_attr(rb_cOutputParam, "cfa_clean", 1, 0);
+	rb_define_attr(rb_cOutputParam, "lclean", 1, 0);
+	rb_define_attr(rb_cOutputParam, "cclean", 1, 0);
+	rb_define_attr(rb_cOutputParam, "cfa_green", 1, 0);
+	rb_define_attr(rb_cOutputParam, "green_thresh", 1, 0);
+	rb_define_attr(rb_cOutputParam, "exp_correc", 1, 0);
+	rb_define_attr(rb_cOutputParam, "exp_shift", 1, 0);
+	rb_define_attr(rb_cOutputParam, "exp_preser", 1, 0);
+
+	rb_define_attr(rb_cOutputParam, "wf_debanding", 1, 0);
+
+	rb_define_attr(rb_cOutputParam, "use_rawspeed", 1, 0);
+
+	rb_define_attr(rb_cOutputParam, "no_auto_scale", 1, 0);
+
+	rb_define_attr(rb_cOutputParam, "no_interpolation", 1, 0);
+
+	rb_define_attr(rb_cOutputParam, "sraw_ycc", 1, 0);
+
+	rb_define_attr(rb_cOutputParam, "force_foveon_x3f", 1, 0);
+	rb_define_attr(rb_cOutputParam, "x3f_flags", 1, 0);
+
+	rb_define_attr(rb_cOutputParam, "sony_arw2_options", 1, 0);
+	rb_define_attr(rb_cOutputParam, "sony_arw2_posterization_thr", 1, 0);
+
+	rb_define_attr(rb_cOutputParam, "coolscan_nef_gamma", 1, 0);
+
+	rb_define_method(rb_cOutputParam, "initialize", RUBY_METHOD_FUNC(rb_output_param_initialize), 0);
+	rb_define_method(rb_cOutputParam, "greybox", RUBY_METHOD_FUNC(rb_output_param_greybox), 4);
+	rb_define_method(rb_cOutputParam, "cropbox", RUBY_METHOD_FUNC(rb_output_param_cropbox), 4);
+	rb_define_method(rb_cOutputParam, "gamma", RUBY_METHOD_FUNC(rb_output_param_gamma), 2);
+	rb_define_method(rb_cOutputParam, "whitebalance", RUBY_METHOD_FUNC(rb_output_param_whitebalance), 4);
+	rb_define_method(rb_cOutputParam, "bright=", RUBY_METHOD_FUNC(rb_output_param_set_bright), 1);
+	rb_define_method(rb_cOutputParam, "highlight=", RUBY_METHOD_FUNC(rb_output_param_set_highlight), 1);
+	rb_define_method(rb_cOutputParam, "use_auto_wb=", RUBY_METHOD_FUNC(rb_output_param_set_use_auto_wb), 1);
+	rb_define_method(rb_cOutputParam, "use_camera_wb=", RUBY_METHOD_FUNC(rb_output_param_set_use_camera_wb), 1);
+	rb_define_method(rb_cOutputParam, "fbdd_noiserd=", RUBY_METHOD_FUNC(rb_output_param_set_fbdd_noiserd), 1);
+
+
+	// LibRaw::MakerNote
+
+	rb_cMakerNote = rb_define_class_under(rb_mLibRaw, "MakerNote", rb_cObject);
+
+	rb_define_attr(rb_cMakerNote, "lens_id", 1, 0);
+	rb_define_attr(rb_cMakerNote, "lens", 1, 0);
+	rb_define_attr(rb_cMakerNote, "lens_format", 1, 0);
+	rb_define_attr(rb_cMakerNote, "lens_mount", 1, 0);
+	rb_define_attr(rb_cMakerNote, "cam_id", 1, 0);
+	rb_define_attr(rb_cMakerNote, "camera_format", 1, 0);
+	rb_define_attr(rb_cMakerNote, "camera_mount", 1, 0);
+	rb_define_attr(rb_cMakerNote, "body", 1, 0);
+	rb_define_attr(rb_cMakerNote, "focal_type", 1, 0);
+	rb_define_attr(rb_cMakerNote, "lens_features_pre", 1, 0);
+	rb_define_attr(rb_cMakerNote, "lens_features_suf", 1, 0);
+	rb_define_attr(rb_cMakerNote, "min_focal", 1, 0);
+	rb_define_attr(rb_cMakerNote, "max_focal", 1, 0);
+	rb_define_attr(rb_cMakerNote, "max_ap_4_min_focal", 1, 0);
+	rb_define_attr(rb_cMakerNote, "max_ap_4_max_focal", 1, 0);
+	rb_define_attr(rb_cMakerNote, "min_ap_4_min_focal", 1, 0);
+	rb_define_attr(rb_cMakerNote, "min_ap_4_max_focal", 1, 0);
+	rb_define_attr(rb_cMakerNote, "max_ap", 1, 0);
+	rb_define_attr(rb_cMakerNote, "min_ap", 1, 0);
+	rb_define_attr(rb_cMakerNote, "cur_focal", 1, 0);
+	rb_define_attr(rb_cMakerNote, "cur_ap", 1, 0);
+	rb_define_attr(rb_cMakerNote, "max_ap_4_cur_focal", 1, 0);
+	rb_define_attr(rb_cMakerNote, "min_ap_4_cur_focal", 1, 0);
+	rb_define_attr(rb_cMakerNote, "lens_f_stops", 1, 0);
+	rb_define_attr(rb_cMakerNote, "teleconverter_id", 1, 0);
+	rb_define_attr(rb_cMakerNote, "teleconverter", 1, 0);
+	rb_define_attr(rb_cMakerNote, "adapter_id", 1, 0);
+	rb_define_attr(rb_cMakerNote, "adapter", 1, 0);
+	rb_define_attr(rb_cMakerNote, "attachment_id", 1, 0);
+	rb_define_attr(rb_cMakerNote, "attachment", 1, 0);
+	rb_define_attr(rb_cMakerNote, "canon_focal_units", 1, 0);
+	rb_define_attr(rb_cMakerNote, "focal_length_in_35mm_format", 1, 0);
+
+
+	// LibRaw::LensInfo
+
+	rb_cLensInfo = rb_define_class_under(rb_mLibRaw, "LensInfo", rb_cObject);
+	rb_define_attr(rb_cLensInfo, "min_focal", 1, 0);
+	rb_define_attr(rb_cLensInfo, "max_focal", 1, 0);
+	rb_define_attr(rb_cLensInfo, "max_ap_4_min_focal", 1, 0);
+	rb_define_attr(rb_cLensInfo, "max_ap_4_max_focal", 1, 0);
+	rb_define_attr(rb_cLensInfo, "exif_max_ap", 1, 0);
+	rb_define_attr(rb_cLensInfo, "lens_make", 1, 0);
+	rb_define_attr(rb_cLensInfo, "lens", 1, 0);
+	rb_define_attr(rb_cLensInfo, "focal_length_in_35mm_format", 1, 0);
+	rb_define_attr(rb_cLensInfo, "nikon", 1, 0);
+	rb_define_attr(rb_cLensInfo, "dng", 1, 0);
+	rb_define_attr(rb_cLensInfo, "makernotes", 1, 0);
 
 
 	// Error
@@ -490,6 +1111,4 @@ void Init_lib_raw(void)
 
 	// LibRaw::BadCrop
 	rb_eBadCrop = rb_define_class_under(rb_mLibRaw, "BadCrop", rb_eRawError);
-}
-
 }
