@@ -11,7 +11,7 @@ Gem::Specification.new do |spec|
   spec.description   = %q{LibRaw is a library for reading RAW files obtained from digital photo cameras}
   spec.summary       = %q{LibRaw is a library for reading RAW files obtained from digital photo cameras}
   spec.homepage      = ""
-  spec.license       = "LGPL"
+  spec.license       = "MIT"
 
   spec.files         = `git ls-files`.split($/)
   spec.extensions    = %w[ext/lib_raw/extconf.rb]
