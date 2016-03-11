@@ -14,6 +14,7 @@ And then execute:
 
 Or install it yourself as:
 
+    # brew install libraw
     $ gem install lib_raw
 
 ## Usage
