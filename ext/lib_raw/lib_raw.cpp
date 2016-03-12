@@ -586,6 +586,39 @@ VALUE rb_output_param_set_bright(VALUE self, VALUE val)
 	return self;
 }
 
+VALUE rb_output_param_set_threshold(VALUE self, VALUE val)
+{
+	libraw_output_params_t *params = get_output_params(self);
+
+	params->threshold = RFLOAT_VALUE(rb_Float(val));
+
+	apply_output_param(self, params);
+
+	return self;
+}
+
+VALUE rb_output_param_set_half_size(VALUE self, VALUE val)
+{
+	libraw_output_params_t *params = get_output_params(self);
+
+	params->half_size = !(val==Qnil || val==Qfalse);
+
+	apply_output_param(self, params);
+
+	return self;
+}
+
+VALUE rb_output_param_set_four_color_rgb(VALUE self, VALUE val)
+{
+	libraw_output_params_t *params = get_output_params(self);
+
+	params->four_color_rgb = !(val==Qnil || val==Qfalse);
+
+	apply_output_param(self, params);
+
+	return self;
+}
+
 VALUE rb_output_param_set_highlight(VALUE self, VALUE val)
 {
 	libraw_output_params_t *params = get_output_params(self);
@@ -613,6 +646,127 @@ VALUE rb_output_param_set_use_camera_wb(VALUE self, VALUE val)
 	libraw_output_params_t *params = get_output_params(self);
 
 	params->use_camera_wb = !(val==Qnil || val==Qfalse);
+
+	apply_output_param(self, params);
+
+	return self;
+}
+
+VALUE rb_output_param_set_use_camera_matrix(VALUE self, VALUE val)
+{
+	libraw_output_params_t *params = get_output_params(self);
+
+	params->use_camera_matrix = !(val==Qnil || val==Qfalse);
+
+	apply_output_param(self, params);
+
+	return self;
+}
+
+VALUE rb_output_param_set_output_color(VALUE self, VALUE val)
+{
+	libraw_output_params_t *params = get_output_params(self);
+
+	params->output_color = NUM2LONG(val);
+
+	apply_output_param(self, params);
+
+	return self;
+}
+
+VALUE rb_output_param_set_output_bps(VALUE self, VALUE val)
+{
+	libraw_output_params_t *params = get_output_params(self);
+
+	params->output_bps = NUM2LONG(val)==16 ? 16 : 8;
+
+	apply_output_param(self, params);
+
+	return self;
+}
+
+VALUE rb_output_param_set_output_tiff(VALUE self, VALUE val)
+{
+	libraw_output_params_t *params = get_output_params(self);
+
+	params->output_tiff = !(val==Qnil || val==Qfalse);
+
+	apply_output_param(self, params);
+
+	return self;
+}
+
+VALUE rb_output_param_set_flip(VALUE self, VALUE val)
+{
+	libraw_output_params_t *params = get_output_params(self);
+
+	params->user_flip = NUM2LONG(val);
+
+	apply_output_param(self, params);
+
+	return self;
+}
+
+VALUE rb_output_param_set_quality(VALUE self, VALUE val)
+{
+	libraw_output_params_t *params = get_output_params(self);
+
+	params->user_qual = NUM2LONG(val);
+
+	apply_output_param(self, params);
+
+	return self;
+}
+
+VALUE rb_output_param_set_black(VALUE self, VALUE val)
+{
+	libraw_output_params_t *params = get_output_params(self);
+
+	params->user_black = NUM2LONG(val);
+
+	apply_output_param(self, params);
+
+	return self;
+}
+
+VALUE rb_output_param_set_saturation(VALUE self, VALUE val)
+{
+	libraw_output_params_t *params = get_output_params(self);
+
+	params->user_sat = NUM2LONG(val);
+
+	apply_output_param(self, params);
+
+	return self;
+}
+
+VALUE rb_output_param_set_median_filter_passes(VALUE self, VALUE val)
+{
+	libraw_output_params_t *params = get_output_params(self);
+
+	params->user_sat = NUM2LONG(val);
+
+	apply_output_param(self, params);
+
+	return self;
+}
+
+VALUE rb_output_param_set_no_auto_bright(VALUE self, VALUE val)
+{
+	libraw_output_params_t *params = get_output_params(self);
+
+	params->no_auto_bright = !(val==Qnil || val==Qfalse);
+
+	apply_output_param(self, params);
+
+	return self;
+}
+
+VALUE rb_output_param_set_use_fuji_rotate(VALUE self, VALUE val)
+{
+	libraw_output_params_t *params = get_output_params(self);
+
+	params->use_fuji_rotate = !(val==Qnil || val==Qfalse);
 
 	apply_output_param(self, params);
 
@@ -1011,9 +1165,23 @@ extern "C" void Init_lib_raw(void)
 	rb_define_method(rb_cOutputParam, "gamma", RUBY_METHOD_FUNC(rb_output_param_gamma), 2);
 	rb_define_method(rb_cOutputParam, "whitebalance", RUBY_METHOD_FUNC(rb_output_param_whitebalance), 4);
 	rb_define_method(rb_cOutputParam, "bright=", RUBY_METHOD_FUNC(rb_output_param_set_bright), 1);
+	rb_define_method(rb_cOutputParam, "threshold=", RUBY_METHOD_FUNC(rb_output_param_set_threshold), 1);
+	rb_define_method(rb_cOutputParam, "half_size=", RUBY_METHOD_FUNC(rb_output_param_set_half_size), 1);
+	rb_define_method(rb_cOutputParam, "four_color_rgb=", RUBY_METHOD_FUNC(rb_output_param_set_four_color_rgb), 1);
 	rb_define_method(rb_cOutputParam, "highlight=", RUBY_METHOD_FUNC(rb_output_param_set_highlight), 1);
 	rb_define_method(rb_cOutputParam, "use_auto_wb=", RUBY_METHOD_FUNC(rb_output_param_set_use_auto_wb), 1);
 	rb_define_method(rb_cOutputParam, "use_camera_wb=", RUBY_METHOD_FUNC(rb_output_param_set_use_camera_wb), 1);
+	rb_define_method(rb_cOutputParam, "use_camera_matrix=", RUBY_METHOD_FUNC(rb_output_param_set_use_camera_matrix), 1);
+	rb_define_method(rb_cOutputParam, "output_color=", RUBY_METHOD_FUNC(rb_output_param_set_output_color), 1);
+	rb_define_method(rb_cOutputParam, "output_bps=", RUBY_METHOD_FUNC(rb_output_param_set_output_bps), 1);
+	rb_define_method(rb_cOutputParam, "output_tiff=", RUBY_METHOD_FUNC(rb_output_param_set_output_tiff), 1);
+	rb_define_method(rb_cOutputParam, "flip=", RUBY_METHOD_FUNC(rb_output_param_set_flip), 1);
+	rb_define_method(rb_cOutputParam, "quality=", RUBY_METHOD_FUNC(rb_output_param_set_quality), 1);
+	rb_define_method(rb_cOutputParam, "black=", RUBY_METHOD_FUNC(rb_output_param_set_black), 1);
+	rb_define_method(rb_cOutputParam, "saturation=", RUBY_METHOD_FUNC(rb_output_param_set_saturation), 1);
+	rb_define_method(rb_cOutputParam, "median_filter_passes=", RUBY_METHOD_FUNC(rb_output_param_set_median_filter_passes), 1);
+	rb_define_method(rb_cOutputParam, "no_auto_bright=", RUBY_METHOD_FUNC(rb_output_param_set_no_auto_bright), 1);
+	rb_define_method(rb_cOutputParam, "use_fuji_rotate=", RUBY_METHOD_FUNC(rb_output_param_set_use_fuji_rotate), 1);
 	rb_define_method(rb_cOutputParam, "fbdd_noiserd=", RUBY_METHOD_FUNC(rb_output_param_set_fbdd_noiserd), 1);
 
 

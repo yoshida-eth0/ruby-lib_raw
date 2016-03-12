@@ -90,9 +90,23 @@ extern VALUE rb_output_param_cropbox(VALUE self, VALUE x, VALUE y, VALUE w, VALU
 extern VALUE rb_output_param_gamma(VALUE self, VALUE pwr, VALUE ts);
 extern VALUE rb_output_param_whitebalance(VALUE self, VALUE r, VALUE g, VALUE b, VALUE g2);
 extern VALUE rb_output_param_set_bright(VALUE self, VALUE val);
+extern VALUE rb_output_param_set_threshold(VALUE self, VALUE val);
+extern VALUE rb_output_param_set_half_size(VALUE self, VALUE val);
+extern VALUE rb_output_param_set_four_color_rgb(VALUE self, VALUE val);
 extern VALUE rb_output_param_set_highlight(VALUE self, VALUE val);
 extern VALUE rb_output_param_set_use_auto_wb(VALUE self, VALUE val);
 extern VALUE rb_output_param_set_use_camera_wb(VALUE self, VALUE val);
+extern VALUE rb_output_param_set_use_camera_matrix(VALUE self, VALUE val);
+extern VALUE rb_output_param_set_output_color(VALUE self, VALUE val);
+extern VALUE rb_output_param_set_output_bps(VALUE self, VALUE val);
+extern VALUE rb_output_param_set_output_tiff(VALUE self, VALUE val);
+extern VALUE rb_output_param_set_flip(VALUE self, VALUE val);
+extern VALUE rb_output_param_set_quality(VALUE self, VALUE val);
+extern VALUE rb_output_param_set_black(VALUE self, VALUE val);
+extern VALUE rb_output_param_set_saturation(VALUE self, VALUE val);
+extern VALUE rb_output_param_set_median_filter_passes(VALUE self, VALUE val);
+extern VALUE rb_output_param_set_no_auto_bright(VALUE self, VALUE val);
+extern VALUE rb_output_param_set_use_fuji_rotate(VALUE self, VALUE val);
 extern VALUE rb_output_param_set_fbdd_noiserd(VALUE self, VALUE val);
 
 // LibRaw::MakerNote
