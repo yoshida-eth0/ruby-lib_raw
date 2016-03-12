@@ -1,6 +1,6 @@
 # LibRaw
 
-TODO: Write a gem description
+LibRaw is a library for reading RAW files obtained from digital photo cameras
 
 ## Installation
 

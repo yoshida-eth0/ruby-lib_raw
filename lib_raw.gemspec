@@ -10,7 +10,7 @@ Gem::Specification.new do |spec|
   spec.email         = ["yoshida.eth0@gmail.com"]
   spec.description   = %q{LibRaw is a library for reading RAW files obtained from digital photo cameras}
   spec.summary       = %q{LibRaw is a library for reading RAW files obtained from digital photo cameras}
-  spec.homepage      = ""
+  spec.homepage      = "https://github.com/yoshida-eth0/ruby-lib_raw"
   spec.license       = "MIT"
 
   spec.files         = `git ls-files`.split($/)
